@@ -1,4 +1,13 @@
 # Define variables
+variable "subscription_id" {
+  type        = string
+  description = "Azure subscription ID"
+  validation {
+    condition = var.subscription_id != null && var.subscription_id != ""
+    error_message = "Subscription ID must be set"
+  }
+}
+
 variable "resource_group_name" {
   type        = string
   description = "Name of the resource group"

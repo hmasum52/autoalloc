@@ -1,3 +1,6 @@
+# subscription details for >=4.0
+# https://search.opentofu.org/provider/hashicorp/azurerm/latest/docs/guides/azure_cli
+subscription_id = "<your subscription id>"
 
 # Resource group settings
 resource_group_name = "autothrottle-rg"
@@ -15,13 +18,13 @@ subnet_address_prefixes = ["10.0.1.0/24"]
 network_security_group_name = "autothrottle-nsg"
 
 # VM settings
-vm_count = 5
-vm_size = "Standard_D32as_v5"
+vm_count = 2
+vm_size =  "Standard_D2s_v3"
 admin_username = "azureuser"         # Replace with your preferred admin username
 admin_password = "P@ssw0rd123!"       # Replace with a secure password
 
 # Public IP settings
-public_ip_allocation_method = "Dynamic"
+public_ip_allocation_method = "Static"
 
 # OS Disk settings
 os_disk_size_gb = 256

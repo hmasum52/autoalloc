@@ -2,24 +2,24 @@
 terraform {
   required_providers {
     azurerm = {
-      // https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs
       source  = "hashicorp/azurerm"
-      version = "~> 3.0.0"
+      version = "~> 4.0"
     }
   }
-
-  required_version = ">= 1.1.0"
 }
 
 
 provider "azurerm" {
   features {}
+
+  subscription_id = var.subscription_id
 }
 
 # Define the resource group
 resource "azurerm_resource_group" "rg" {
   name     = var.resource_group_name
   location = var.resource_group_location
+  tags = var.tags
 }
 
 # Define the virtual network and subnet
@@ -59,6 +59,7 @@ resource "azurerm_network_security_rule" "ssh" {
 }
 
 # Define public IP and network interface
+# https://search.opentofu.org/provider/hashicorp/azurerm/latest/docs/resources/public_ip
 resource "azurerm_public_ip" "public_ip" {
   count               = var.vm_count
   name                = "autothrottle-pip-${count.index + 1}"
@@ -114,11 +115,4 @@ resource "azurerm_linux_virtual_machine" "vm" {
   }
 
   disable_password_authentication = false
-}
-
-# Apply tags to the resource group
-resource "azurerm_resource_group" "tags" {
-  name     = azurerm_resource_group.rg.name
-  location = azurerm_resource_group.rg.location
-  tags     = var.tags
 }
