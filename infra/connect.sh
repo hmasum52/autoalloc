@@ -1,5 +1,15 @@
 #!/bin/bash
 
+# Prompt for root password
+read -p "Enter root password: " ROOT_PASSWORD
+echo
+
+if [ -z "$ROOT_PASSWORD" ]; then
+    echo "❌ Root password cannot be empty"
+    exit 1
+fi
+
+
 # Login to Azure if not already logged in
 echo "🔄 Checking Azure login status..."
 az account show > /dev/null 2>&1 || az login
@@ -50,9 +60,6 @@ for i in "${!VM_NAMES[@]}"; do
     echo "${VM_NAMES[$i]} - ${VM_IPS[$i]}"
 done
 
-echo "
-⚠️  When prompted for password, use: Autopa\$\$
-"
 
 # Process each VM
 for i in "${!VM_NAMES[@]}"; do
@@ -73,7 +80,6 @@ EOL
     
     # Copy SSH key to admin user
     echo "🔑 Copying SSH key to admin user..."
-    echo "When prompted, enter: Autopa\$\$"
     ssh-copy-id -f -i "$KEY_FILE" "auto@$ip"
     
     # Verify admin user SSH access
@@ -81,26 +87,18 @@ EOL
     if [ $? -eq 0 ]; then
         echo "✅ Admin SSH key setup successful"
     else
-        echo "❌ Admin SSH key setup failed for $name"
-        continue
+        # Setup root access with proper waiting
+        echo "👑 Setting up root access..."
+        ssh -i "$KEY_FILE" "auto@$ip" "
+            # Set root password and SSH config in one sudo session
+            sudo sh -c '
+                echo \"root:$ROOT_PASSWORD\" | chpasswd
+                sed -i \"s/#PermitRootLogin prohibit-password/PermitRootLogin yes/\" /etc/ssh/sshd_config
+                sed -i \"s/PermitRootLogin prohibit-password/PermitRootLogin yes/\" /etc/ssh/sshd_config
+                systemctl restart sshd
+            '
+        "
     fi
-    
-    # Setup root access with proper waiting
-    echo "👑 Setting up root access..."
-    ssh -i "$KEY_FILE" "auto@$ip" "
-        # Set root password and SSH config in one sudo session
-        sudo sh -c '
-            echo \"root:Autopa\$\$\" | chpasswd
-            sed -i \"s/#PermitRootLogin prohibit-password/PermitRootLogin yes/\" /etc/ssh/sshd_config
-            sed -i \"s/PermitRootLogin prohibit-password/PermitRootLogin yes/\" /etc/ssh/sshd_config
-            systemctl restart sshd
-        '
-       
-    "
-    
-    # Wait for sshd to fully restart
-    # echo "⏳ Waiting for SSH service to stabilize..."
-    # sleep 5
     
     # Add the public key directly to root's authorized_keys
     echo "🔑 Setting up root SSH key..."
@@ -117,7 +115,6 @@ EOL
     
     # Verify root SSH access
     echo "🔍 Verifying root access..."
-    #sleep 2
     if ssh -i "$KEY_FILE" -o BatchMode=yes "root@$ip" exit 2>/dev/null; then
         echo "✅ Root SSH key setup successful"
     else
@@ -142,9 +139,8 @@ done
 echo "
 🎉 SSH setup process completed!
 👉 You should now be able to use:
-    ssh autothrottle-1 whoami or ssh root@autothrottle-1 whoami
-    ssh autothrottle-2 whoami or ssh root@autothrottle-2 whoami
-    ssh autothrottle-3 whoami or ssh root@autothrottle-3 whoami
-
-all without password prompts. and you can use the `root` user for all commands.
+    ssh root@autothrottle-1 whoami 
+    ssh root@autothrottle-2 whoami
+    ssh root@autothrottle-3 whoami
+    to test SSH access to the VMs.
 "
