@@ -75,7 +75,7 @@ for i in "${!VM_NAMES[@]}"; do
 ------------------------------------------------"
     
     # Add to SSH config if not already present
-    if ! grep -q "Host $name" ~/.ssh/config; then
+    if ! grep -q "Host $name" ~/.ssh/config && ! grep -q "HostName $ip" ~/.ssh/config; then
         echo "➕ Adding $name to SSH config..."
         cat >> ~/.ssh/config << EOL
 
