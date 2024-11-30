@@ -9,7 +9,6 @@ if [ -z "$ROOT_PASSWORD" ]; then
     exit 1
 fi
 
-
 # Login to Azure if not already logged in
 echo "🔄 Checking Azure login status..."
 az account show > /dev/null 2>&1 || az login
@@ -20,15 +19,13 @@ echo "📁 Using resource group: $RG"
 
 # Set proper permissions and create directories
 echo "🔒 Setting proper SSH directory permissions..."
-mkdir -p ~/.ssh/config
+mkdir -p ~/.ssh
 chmod 700 ~/.ssh
-chmod 700 ~/.ssh/config
 
 # Create single SSH key if it doesn't exist
 KEY_FILE="$HOME/.ssh/autothrottle"
 if [ ! -f "$KEY_FILE" ]; then
     echo "🔑 Creating SSH key pair..."
-    mkdir -p "$(dirname "$KEY_FILE")"
     ssh-keygen -t rsa -b 4096 -f "$KEY_FILE" -N ""
 fi
 
@@ -36,9 +33,16 @@ fi
 chmod 600 "$KEY_FILE"
 chmod 644 "${KEY_FILE}.pub"
 
-# Create base SSH config
-echo "📝 Creating SSH config file..."
-cat > ~/.ssh/config << EOL
+# First check if autothrottle config already exists
+if ! grep -q "Host autothrottle-\*" ~/.ssh/config 2>/dev/null; then
+    echo "📝 Adding autothrottle base configuration..."
+    # Ensure there's a newline before adding new content
+    if [ -f ~/.ssh/config ] && [ -s ~/.ssh/config ]; then
+        echo "" >> ~/.ssh/config
+    fi
+    
+    cat >> ~/.ssh/config << EOL
+# Autothrottle Configuration
 Host autothrottle-*
     IdentityFile ${KEY_FILE}
     StrictHostKeyChecking no
@@ -47,6 +51,7 @@ Host autothrottle-*
     PasswordAuthentication yes
     User root
 EOL
+fi
 
 # Get VM information
 echo "🔍 Fetching VM information..."
@@ -60,7 +65,6 @@ for i in "${!VM_NAMES[@]}"; do
     echo "${VM_NAMES[$i]} - ${VM_IPS[$i]}"
 done
 
-
 # Process each VM
 for i in "${!VM_NAMES[@]}"; do
     name="${VM_NAMES[$i]}"
@@ -70,14 +74,18 @@ for i in "${!VM_NAMES[@]}"; do
 📌 Processing VM: $name ($ip)
 ------------------------------------------------"
     
-    # Add to SSH config
-    echo "➕ Adding to SSH config..."
-    cat >> ~/.ssh/config << EOL
+    # Add to SSH config if not already present
+    if ! grep -q "Host $name" ~/.ssh/config; then
+        echo "➕ Adding $name to SSH config..."
+        cat >> ~/.ssh/config << EOL
 
 Host $name
     HostName $ip
 EOL
-    
+    else
+        echo "ℹ️  $name already exists in SSH config"
+    fi
+
     # Copy SSH key to admin user
     echo "🔑 Copying SSH key to admin user..."
     ssh-copy-id -f -i "$KEY_FILE" "auto@$ip"
