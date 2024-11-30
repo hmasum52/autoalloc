@@ -3,10 +3,11 @@
 
 const fs = require('fs');
 
-const worker1 = 'autothrottle-2';
-const worker2 = 'autothrottle-3';
-const worker3 = 'autothrottle-4';
-const worker4 = 'autothrottle-5';
+// Update worker nodes to match 3 VM setup
+const worker1 = 'autothrottle-1';  // Control plane + frontend
+const worker2 = 'autothrottle-2';  // Worker node 1
+const worker3 = 'autothrottle-3';  // Worker node 2
+
 const image_go = 'igorrudyk1/hotelreservation:latest@sha256:cb64678950a01728551701f5782e34eef049e422f73eae7dcb69d7549682008c';
 const image_consul = 'consul:1.15.4@sha256:362519540425cf077229da3851f3b80d622742dd81f1b2014863c044c2124ef3';
 const image_jaeger = 'jaegertracing/all-in-one:latest@sha256:30238ffd383f266651cd4e0c36be67b6b0d3d882d0bbb67304c39af9ee61a4ef';
@@ -151,6 +152,16 @@ function go(nodeName, name, command, port) {
         ports: [
           { containerPort: port },
         ],
+        resources: {
+          limits: {
+            cpu: '500m',
+            memory: '512Mi'
+          },
+          requests: {
+            cpu: '250m',
+            memory: '256Mi'
+          }
+        }
       },
     ],
     ports: [
@@ -167,12 +178,22 @@ function memcached(nodeName, name) {
         name,
         image: image_memcached,
         env: env({
-          MEMCACHED_CACHE_SIZE: '128',
+          MEMCACHED_CACHE_SIZE: '64',  // Reduced from 128
           MEMCACHED_THREADS: '2',
         }),
         ports: [
           { containerPort: 11211 }
         ],
+        resources: {
+          limits: {
+            cpu: '200m',
+            memory: '128Mi'
+          },
+          requests: {
+            cpu: '100m',
+            memory: '64Mi'
+          }
+        }
       },
     ],
     ports: [
@@ -200,6 +221,16 @@ function mongodb(nodeName, name, serviceName) {
           volumeMounts: [
             { mountPath: '/data/db', name: serviceName }
           ],
+          resources: {
+            limits: {
+              cpu: '500m',
+              memory: '512Mi'
+            },
+            requests: {
+              cpu: '250m',
+              memory: '256Mi'
+            }
+          }
         },
       ],
       hostname,
@@ -225,7 +256,6 @@ const doc = {
   apiVersion: 'v1',
   kind: 'List',
   items: [
-
     {
       apiVersion: 'v1',
       kind: 'Namespace',
@@ -247,6 +277,16 @@ const doc = {
             { containerPort: 8500 },
             { containerPort: 53, protocol: 'UDP' },
           ],
+          resources: {
+            limits: {
+              cpu: '200m',
+              memory: '256Mi'
+            },
+            requests: {
+              cpu: '100m',
+              memory: '128Mi'
+            }
+          }
         },
       ],
       ports: [
@@ -273,6 +313,16 @@ const doc = {
             { containerPort: 6831, protocol: 'UDP' },
             { containerPort: 6832, protocol: 'UDP' },
           ],
+          resources: {
+            limits: {
+              cpu: '200m',
+              memory: '256Mi'
+            },
+            requests: {
+              cpu: '100m',
+              memory: '128Mi'
+            }
+          }
         },
       ],
       serviceType: 'NodePort',
@@ -288,6 +338,7 @@ const doc = {
       ],
     }),
 
+    // Frontend services on worker1
     ...deployment_service('frontend', {
       nodeName: worker1,
       containers: [
@@ -298,6 +349,16 @@ const doc = {
           ports: [
             { containerPort: 5000 },
           ],
+          resources: {
+            limits: {
+              cpu: '500m',
+              memory: '512Mi'
+            },
+            requests: {
+              cpu: '250m',
+              memory: '256Mi'
+            }
+          }
         },
       ],
       serviceType: 'NodePort',
@@ -306,30 +367,26 @@ const doc = {
       ],
     }),
 
-    ...go(worker3, 'geo', 'geo', 8083),
-    ...mongodb(worker3, 'mongodb-geo', 'geo'),
+    // Core services on worker2
+    ...go(worker2, 'search', 'search', 8082),
+    ...go(worker2, 'geo', 'geo', 8083),
+    ...mongodb(worker2, 'mongodb-geo', 'geo'),
+    ...go(worker2, 'profile', 'profile', 8081),
+    ...memcached(worker2, 'memcached-profile'),
+    ...mongodb(worker2, 'mongodb-profile', 'profile'),
 
-    ...go(worker4, 'profile', 'profile', 8081),
-    ...memcached(worker4, 'memcached-profile'),
-    ...mongodb(worker4, 'mongodb-profile', 'profile'),
-
-    ...go(worker4, 'rate', 'rate', 8084),
-    ...memcached(worker4, 'memcached-rate'),
-    ...mongodb(worker4, 'mongodb-rate', 'rate'),
-
-    ...go(worker2, 'recommendation', 'recommendation', 8085),
-    ...mongodb(worker2, 'mongodb-recommendation', 'recommendation'),
-
-    ...go(worker2, 'reservation', 'reservation', 8087),
-    ...memcached(worker2, 'memcached-reserve'),
-    ...mongodb(worker2, 'mongodb-reservation', 'reservation'),
-
-    ...go(worker3, 'search', 'search', 8082),
-
+    // Additional services on worker3
+    ...go(worker3, 'rate', 'rate', 8084),
+    ...memcached(worker3, 'memcached-rate'),
+    ...mongodb(worker3, 'mongodb-rate', 'rate'),
+    ...go(worker3, 'recommendation', 'recommendation', 8085),
+    ...mongodb(worker3, 'mongodb-recommendation', 'recommendation'),
+    ...go(worker3, 'reservation', 'reservation', 8087),
+    ...memcached(worker3, 'memcached-reserve'),
+    ...mongodb(worker3, 'mongodb-reservation', 'reservation'),
     ...go(worker3, 'user', 'user', 8086),
     ...mongodb(worker3, 'mongodb-user', 'user'),
-
   ],
 };
 
-fs.writeFileSync('hotel-reservation/1.json', JSON.stringify(doc, null, 2) + '\n');
+fs.writeFileSync('1.json', JSON.stringify(doc, null, 2) + '\n');
