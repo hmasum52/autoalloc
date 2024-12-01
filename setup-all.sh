@@ -11,7 +11,7 @@ for i in {1..3}; do
 done
 
 # upload to master (autothrottle-1)
-rsync -avz evaluation-hotel.py flannel.yaml hotel-reservation requirements.txt setup-node.sh utils.py worker-daemon.py root@autothrottle-1:
+rsync -avz evaluation.py flannel.yaml hotel-reservation requirements.txt setup-node.sh utils.py worker-daemon.py root@autothrottle-1:
 
 # setup master
 ssh root@autothrottle-1 ./setup-node.sh master
