@@ -65,6 +65,24 @@ for i in "${!VM_NAMES[@]}"; do
     echo "${VM_NAMES[$i]} - ${VM_IPS[$i]}"
 done
 
+update_ssh_config() {
+    local name="$1" ip="$2" cfg="$HOME/.ssh/config"
+    
+    # Create/backup config
+    touch "$cfg"
+    cp "$cfg" "$cfg.bak"
+    
+    # Remove old entry and add new one 
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' "/^Host $name$/,/^$/d" "$cfg"
+    else
+        sed -i "/^Host $name$/,/^$/d" "$cfg"
+    fi
+    
+    printf "\nHost %s\n    HostName %s\n" "$name" "$ip" >> "$cfg"
+    chmod 600 "$cfg"
+}
+
 # Process each VM
 for i in "${!VM_NAMES[@]}"; do
     name="${VM_NAMES[$i]}"
@@ -74,17 +92,10 @@ for i in "${!VM_NAMES[@]}"; do
 📌 Processing VM: $name ($ip)
 ------------------------------------------------"
     
-    # Add to SSH config if not already present
-    if ! grep -q "Host $name" ~/.ssh/config && ! grep -q "HostName $ip" ~/.ssh/config; then
-        echo "➕ Adding $name to SSH config..."
-        cat >> ~/.ssh/config << EOL
+    # Update SSH config
+    echo "📝 Updating SSH config..."
+    update_ssh_config "$name" "$ip"
 
-Host $name
-    HostName $ip
-EOL
-    else
-        echo "ℹ️  $name already exists in SSH config"
-    fi
 
     # Copy SSH key to admin user
     echo "🔑 Copying SSH key to admin user..."
