@@ -11,14 +11,20 @@ for i in {1..3}; do
 done
 
 # upload to master (autothrottle-1)
-rsync -avz evaluation.py flannel.yaml hotel-reservation requirements.txt setup-node.sh utils.py worker-daemon.py root@autothrottle-1:
+rsync -avz evaluation.py hotel-reservation requirements.txt setup-node.sh utils.py worker-daemon.py root@autothrottle-1:
 
 # setup master
-ssh root@autothrottle-1 ./setup-node.sh master
+if ssh root@autothrottle-1 kubectl get nodes &> /dev/null; then
+    ssh root@autothrottle-1 kubectl get nodes
+    echo "Control-plane node is already running, skipping setup."
+else
+    echo "Control-plane node is not running, setting up..."
+    # ssh root@autothrottle-1 ./setup-node.sh master
+fi
 
 # download from master
 mkdir -p tmp
-rsync -avz root@autothrottle-1:join-command tmp/kube-config tmp/
+rsync -avz root@autothrottle-1:"{join-command,kube-config}" tmp/
 
 # setup workers (autothrottle-2 and autothrottle-3)
 for i in {2..3}; do

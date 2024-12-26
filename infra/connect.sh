@@ -99,7 +99,7 @@ for i in "${!VM_NAMES[@]}"; do
 
     # Copy SSH key to admin user
     echo "🔑 Copying SSH key to admin user..."
-    ssh-copy-id -f -i "$KEY_FILE" "auto@$ip"
+    ssh-copy-id -f -i "$KEY_FILE" -o StrictHostKeyChecking=no "auto@$ip"
     
     # Verify admin user SSH access
     ssh -i "$KEY_FILE" -o BatchMode=yes "auto@$ip" exit 2>/dev/null
