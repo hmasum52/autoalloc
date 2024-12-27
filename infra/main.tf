@@ -58,6 +58,21 @@ resource "azurerm_network_security_rule" "ssh" {
   network_security_group_name = azurerm_network_security_group.nsg.name
 }
 
+# allow port 6443
+resource "azurerm_network_security_rule" "k8s" {
+  name                        = "AllowK8s"
+  priority                    = 1002
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "6443"
+  source_address_prefix       = "*"
+  destination_address_prefix  = "*"
+  resource_group_name         = azurerm_resource_group.rg.name
+  network_security_group_name = azurerm_network_security_group.nsg.name
+}
+
 # Define public IP and network interface
 # https://search.opentofu.org/provider/hashicorp/azurerm/latest/docs/resources/public_ip
 resource "azurerm_public_ip" "public_ip" {

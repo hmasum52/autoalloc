@@ -1,6 +1,10 @@
 #!/bin/bash
 set -ex
 
+# Prompt for master node public IP
+read -p "Enter master node public IP: " PUBLIC_IP
+echo "🔗 Using master node public IP: $PUBLIC_IP"
+
 # check SSH connections for the 3 VMs
 for i in {1..3}; do
     if [ "$(ssh root@autothrottle-$i whoami)" != root ]; then
@@ -19,7 +23,7 @@ if ssh root@autothrottle-1 kubectl get nodes &> /dev/null; then
     echo "Control-plane node is already running, skipping setup."
 else
     echo "Control-plane node is not running, setting up..."
-    # ssh root@autothrottle-1 ./setup-node.sh master
+    ssh root@autothrottle-1 ./setup-node.sh master $PUBLIC_IP
 fi
 
 # download from master

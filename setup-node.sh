@@ -85,7 +85,9 @@ if [ "$1" = master ]; then
     echo "Initializing Kubernetes cluster with newer networking configs"
     # https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/
     kubeadm init \
-        --pod-network-cidr=10.244.0.0/16 --kubernetes-version=v1.32.0 \
+        --pod-network-cidr=10.244.0.0/16 \
+        --apiserver-cert-extra-sans=$2 \
+        --kubernetes-version=v1.32.0 \
         --skip-phases=addon/kube-proxy
 
     echo "Setting up Kubernetes credentials..."
@@ -93,9 +95,15 @@ if [ "$1" = master ]; then
     cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
     chown $(id -u):$(id -g) $HOME/.kube/config
 
-    echo "Installing Flannel networking..."
+    echo "Installing Flannel net    working..."
     #  https://github.com/flannel-io/flannel#deploying-flannel-manually
     kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+    # kubectl delete -f https://reweave.azurewebsites.net/k8s/v1.32/net.yaml
+
+
+    # add flannel network policy
+    # kubectl delete -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+
 
     echo "Creating join command for workers..."
     kubeadm token create --print-join-command > join-command
