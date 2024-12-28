@@ -2,16 +2,27 @@
 set -ex
 
 # https://kubernetes.io/docs/setup/production-environment/container-runtimes/
-echo Installing Container Runtimes...
+#  Installing Container Runtimes...
 
-echo Set required sysctl parameters
-cat <<EOF | tee /etc/sysctl.d/k8s.conf
-net.ipv4.ip_forward                 = 1
-EOF
-
-echo "Disabling swap (required for Kubernetes)"
+# Disabling swap (required for Kubernetes)
 swapoff -a
 sed -i '/swap/d' /etc/fstab
+
+# Load necessary kernel modules
+cat <<EOF | tee /etc/modules-load.d/k8s.conf
+overlay
+br_netfilter
+EOF
+
+modprobe overlay
+modprobe br_netfilter
+
+# Set required sysctl parameters
+cat <<EOF | tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+EOF
 
 echo Apply sysctl params without reboot
 sysctl --system
@@ -84,11 +95,15 @@ echo "Setting up Kubernetes cluster..."
 if [ "$1" = master ]; then
     echo "Initializing Kubernetes cluster with newer networking configs"
     # https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/
+    PUBLIC_IP=$(curl ifconfig.me && echo "")
+    echo "Public IP: $PUBLIC_IP"
     kubeadm init \
         --pod-network-cidr=10.244.0.0/16 \
-        --apiserver-cert-extra-sans=$2 \
+        --apiserver-advertise-address=$(hostname -i) \
+        --apiserver-cert-extra-sans=$PUBLIC_IP \
+        --control-plane-endpoint=$PUBLIC_IP \
         --kubernetes-version=v1.32.0 \
-        --skip-phases=addon/kube-proxy
+        --node-name=master
 
     echo "Setting up Kubernetes credentials..."
     mkdir -p $HOME/.kube
@@ -96,14 +111,7 @@ if [ "$1" = master ]; then
     chown $(id -u):$(id -g) $HOME/.kube/config
 
     echo "Installing Flannel net    working..."
-    #  https://github.com/flannel-io/flannel#deploying-flannel-manually
     kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
-    # kubectl delete -f https://reweave.azurewebsites.net/k8s/v1.32/net.yaml
-
-
-    # add flannel network policy
-    # kubectl delete -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
-
 
     echo "Creating join command for workers..."
     kubeadm token create --print-join-command > join-command

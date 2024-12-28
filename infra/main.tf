@@ -8,10 +8,8 @@ terraform {
   }
 }
 
-
 provider "azurerm" {
   features {}
-
   subscription_id = var.subscription_id
 }
 
@@ -44,6 +42,7 @@ resource "azurerm_network_security_group" "nsg" {
   resource_group_name = azurerm_resource_group.rg.name
 }
 
+// allow port 22
 resource "azurerm_network_security_rule" "ssh" {
   name                        = "AllowSSH"
   priority                    = 1001
@@ -68,6 +67,52 @@ resource "azurerm_network_security_rule" "k8s" {
   source_port_range           = "*"
   destination_port_range      = "6443"
   source_address_prefix       = "*"
+  destination_address_prefix  = "*"
+  resource_group_name         = azurerm_resource_group.rg.name
+  network_security_group_name = azurerm_network_security_group.nsg.name
+}
+
+// allow master mode specific ports
+// ["2379", "2380", "10250", "10251", "10257", "10259"]
+resource "azurerm_network_security_rule" "master" {
+  name                        = "AllowMasterNodeEtcd"
+  priority                    = 1003
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "2379-2380"
+  source_address_prefix       = var.address_space[0]
+  destination_address_prefix  = "*"
+  resource_group_name         = azurerm_resource_group.rg.name
+  network_security_group_name = azurerm_network_security_group.nsg.name
+}
+
+// allow common ports of master and worker nodes
+resource "azurerm_network_security_rule" "common" {
+  name                        = "AllowCommon"
+  priority                    = 1004
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "10250-10259"
+  source_address_prefix       = var.address_space[0]
+  destination_address_prefix  = "*"
+  resource_group_name         = azurerm_resource_group.rg.name
+  network_security_group_name = azurerm_network_security_group.nsg.name
+}
+
+// allow worker node specific ports
+resource "azurerm_network_security_rule" "worker" {
+  name                        = "AllowWorkerNode"
+  priority                    = 1005
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "30000-32767"
+  source_address_prefix       = var.address_space[0]
   destination_address_prefix  = "*"
   resource_group_name         = azurerm_resource_group.rg.name
   network_security_group_name = azurerm_network_security_group.nsg.name
@@ -104,7 +149,6 @@ resource "azurerm_network_interface_security_group_association" "nsg_association
   network_security_group_id = azurerm_network_security_group.nsg.id
 }
 
-# Define the virtual machines
 resource "azurerm_linux_virtual_machine" "vm" {
   count                 = var.vm_count
   name                  = "autothrottle-${count.index + 1}"
