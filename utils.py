@@ -87,7 +87,7 @@ class ExploreTower:
             stats['_tower']['action_p'] = 1 / len(self.targets) ** 2
             return {}
 
-
+# libary to implement contextul bandit
 class VwTower:
     learning_rate = 0.5
 
@@ -98,13 +98,14 @@ class VwTower:
         self.slo = slo
         self.samples = list(samples)
         self.explore = explore
-        self.drop_samples = drop_samples
+
         self.aggregate_samples = aggregate_samples
         self.last_rps = None
         self.last_action = None
         self.last_action_p = None
 
     def __call__(self, t, stats, scalers):
+        # Collect historical data
         if self.last_rps is not None:
             if self.drop_samples:
                 self.drop_samples -= 1
@@ -113,6 +114,7 @@ class VwTower:
                 allocation = stats['_tower']['allocation']
                 self.samples.append((self.last_rps, self.last_action, self.last_action_p, latency, allocation))
 
+        # Train the VW model
         train_samples = list(self.samples)
 
         try:
@@ -166,6 +168,7 @@ class VwTower:
         for rps, action, action_p, cost in train_samples:
             vw.learn(f'{action+1}:{cost}:{action_p} | rps:{rps}')
 
+        # Predict the best action
         rps = stats['_tower']['rps']
         distribution = vw.predict(f'| rps:{rps}')
         action = numpy.random.choice(len(distribution), p=numpy.array(distribution) / sum(distribution))
