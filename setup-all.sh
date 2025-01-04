@@ -11,7 +11,7 @@ for i in {1..3}; do
 done
 
 # upload to master (autothrottle-1)
-rsync -avz evaluation.py hotel-reservation traces requirements.txt utils.py worker-daemon.py root@autothrottle-1:
+rsync -avz evaluation.py hotel-reservation traces requirements.txt setup-node.sh utils.py worker-daemon.py root@autothrottle-1:
 
 # setup master
 if ssh root@autothrottle-1 kubectl get nodes &> /dev/null; then
