@@ -11,7 +11,7 @@ for i in {1..3}; do
 done
 
 # upload to master (autothrottle-1)
-rsync -avz evaluation.py hotel-reservation requirements.txt setup-node.sh utils.py worker-daemon.py root@autothrottle-1:
+rsync -avz evaluation.py hotel-reservation traces requirements.txt utils.py worker-daemon.py root@autothrottle-1:
 
 # setup master
 if ssh root@autothrottle-1 kubectl get nodes &> /dev/null; then
@@ -34,6 +34,13 @@ for i in {2..3}; do
     # setup worker
     ssh root@autothrottle-$i ./setup-node.sh worker
 done
+
+# install metrics server on master
+ssh root@autothrottle-1 kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+# set - '--kubelet-insecure-tls=true' in spec.containers.args
+ssh root@autothrottle-1 "kubectl -n kube-system get deployment metrics-server -o jsonpath='{.spec.template.spec.containers[0].args}' | grep -q -- '--kubelet-insecure-tls=true'" \
+    ||     ssh root@autothrottle-1 "kubectl -n kube-system patch deployment metrics-server --type=json -p='[{\"op\": \"add\", \"path\": \"/spec/template/spec/containers/0/args/-\", \"value\": \"--kubelet-insecure-tls=true\"}]'"
 
 # cleanup
 rm tmp/join-command tmp/kube-config
