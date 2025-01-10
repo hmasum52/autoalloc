@@ -98,7 +98,7 @@ class VwTower:
         self.slo = slo
         self.samples = list(samples)
         self.explore = explore
-
+        self.drop_samples = drop_samples
         self.aggregate_samples = aggregate_samples
         self.last_rps = None
         self.last_action = None
