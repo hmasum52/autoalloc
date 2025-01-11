@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 
 
 def get_user():
-    user_id = random.randint(0, 500)
+    user_id = random.randint(0, 200) # was 500
     user_name = 'Cornell_' + str(user_id)
     password = ""
     for i in range(0, 10):

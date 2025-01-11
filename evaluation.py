@@ -8,12 +8,14 @@ from utils import *
 resource.setrlimit(resource.RLIMIT_NOFILE, (65535, 1048576))
 signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
 
+TRACE_FOLDER_PATH = 'traces/10min'
+
 
 # Every time a benchmark finishes, this function will be called.
 # You can use this function to send a notification to your phone or do some other stuff.
 def send_notification(message):
     try:
-        pass
+        print(message)
         # import os
         # os.system(f'timeout 60 curl ...')
         # import requests
@@ -26,23 +28,25 @@ def send_notification(message):
         traceback.print_exc()
 
 
-def application(name, slo, nodes, target1components, deploy, teardown, traces_and_targets, trace_multiplier, aggregate_samples):
+def application(name, slo, nodes, target1components, deploy, teardown, traces_and_targets, trace_multiplier, aggregate_samples, n_warmup=6):
     locustfile = f'{name}/locustfile.py'
     url = 'http://localhost:30001'
     namespace = name
     components = sorted(sum(nodes.values(), []))
-    locust_workers = 8
-    warmup_minutes = 3  # see section A.7 in the paper
+    locust_workers = 4 # reduced from 8 to 4
+    warmup_minutes = 1  # see section A.7 in the paper reduced from 3 min to 1 min
     warmup_seconds = warmup_minutes * 60
-    initial_limit = 32
+    initial_limit = 2 # number CPUs in each node
     tower_targets = [0.0, 0.02, 0.04, 0.06, 0.1, 0.15, 0.2, 0.25, 0.3]  # see section 4 in the paper
     samples = []
 
     # all our locustfiles are designed to read each second's RPS from rps.txt
-    trace = load_trace('traces/diurnal-2.txt')
+    trace = load_trace(f'{TRACE_FOLDER_PATH}/diurnal-2.txt')
+    trace_duration_sec=len(trace) # for example 3 min its 180 sec, paper: 1 hour = 3600 sec
     trace = [round(i * trace_multiplier) for i in trace]
     warmup = []
     for i in range(warmup_seconds):
+        # icrease the RPS by 10% every 5 seconds
         rps = round(trace[0] * 1.1 ** ((i - warmup_seconds) / 5))  # x1.1 every 5 seconds, see section A.7 in the paper
         if rps < 1:
             rps = 1
@@ -51,7 +55,8 @@ def application(name, slo, nodes, target1components, deploy, teardown, traces_an
     dump_trace(trace, 'rps.txt')
 
     # see section A.7 in the paper for the warmup process
-    for i in range(6):
+    # 6 random exploration stage
+    for i in range(n_warmup):
         path = f'data/{name}/autothrottle-warmup/a{i + 1}'
         if benchmark(
             output_dir=path,
@@ -75,7 +80,7 @@ def application(name, slo, nodes, target1components, deploy, teardown, traces_an
                 .downsample_time_weighted_average(60).slice(warmup_seconds + 30, float('inf')).average()
             request_latency = load_request_latency(path).slice(warmup_seconds, float('inf'))
             p99_latency = request_latency.percentage(99)
-            average_rps = len(request_latency) / 3600
+            average_rps = len(request_latency) / trace_duration_sec
             log = {
                 'time': datetime.datetime.utcnow().isoformat() + 'Z',
                 'path': path,
@@ -91,7 +96,9 @@ def application(name, slo, nodes, target1components, deploy, teardown, traces_an
                 f.write(json.dumps(log) + '\n')
             send_notification(f'{name} warmup {i + 1} / 12 finished')
         samples += load_samples(path)
-    for i in range(6):
+   
+    # 6 normal leanring with a rate of 0.5
+    for i in range(n_warmup):
         path = f'data/{name}/autothrottle-warmup/b{i + 1}'
         if benchmark(
             output_dir=path,
@@ -114,11 +121,12 @@ def application(name, slo, nodes, target1components, deploy, teardown, traces_an
             ),
             locust_workers=locust_workers,
         ):
+            print(f"benchmark finished for {path}. Starting duirnal 2 warmup")
             allocation = TimeSeries.zip_with(lambda *args: sum(args), *[v for k, v in load_cpu_limit(path).items()]) \
                 .downsample_time_weighted_average(60).slice(warmup_seconds + 30, float('inf')).average()
             request_latency = load_request_latency(path).slice(warmup_seconds, float('inf'))
             p99_latency = request_latency.percentage(99)
-            average_rps = len(request_latency) / 3600
+            average_rps = len(request_latency) / trace_duration_sec
             log = {
                 'time': datetime.datetime.utcnow().isoformat() + 'Z',
                 'path': path,
@@ -139,11 +147,11 @@ def application(name, slo, nodes, target1components, deploy, teardown, traces_an
         # all our locustfiles are designed to read each second's RPS from rps.txt
         if isinstance(trace_name, str):
             workload_name = trace_name
-            trace = load_trace(f'traces/{trace_name}.txt')
+            trace = load_trace(f'{TRACE_FOLDER_PATH}/{trace_name}.txt')
             trace = [round(i * trace_multiplier) for i in trace]
         elif isinstance(trace_name, int):
             workload_name = 'constant'
-            trace = [trace_name] * 3600
+            trace = [trace_name] * trace_duration_sec
         else:
             raise ValueError
         warmup = []
@@ -183,7 +191,7 @@ def application(name, slo, nodes, target1components, deploy, teardown, traces_an
                 .downsample_time_weighted_average(60).slice(warmup_seconds + 30, float('inf')).average()
             request_latency = load_request_latency(path).slice(warmup_seconds, float('inf'))
             p99_latency = request_latency.percentage(99)
-            average_rps = len(request_latency) / 3600
+            average_rps = len(request_latency) / trace_duration_sec
             log = {
                 'time': datetime.datetime.utcnow().isoformat() + 'Z',
                 'path': path,
@@ -226,7 +234,7 @@ def application(name, slo, nodes, target1components, deploy, teardown, traces_an
                         .downsample_time_weighted_average(60).slice(warmup_seconds + 30, float('inf')).average()
                     request_latency = load_request_latency(path).slice(warmup_seconds, float('inf'))
                     p99_latency = request_latency.percentage(99)
-                    average_rps = len(request_latency) / 3600
+                    average_rps = len(request_latency) / trace_duration_sec
                     log = {
                         'time': datetime.datetime.utcnow().isoformat() + 'Z',
                         'path': path,
@@ -254,56 +262,60 @@ def application(name, slo, nodes, target1components, deploy, teardown, traces_an
 
 def hotel_reservation():
     def deploy():
+        print('Deploying hotel-reservation')
         kubectl_apply('hotel-reservation/1.json', 'hotel-reservation', 19)
-        time.sleep(180)
-        # warm up by sending 200 requests per second for 15 seconds and then wait for 60 seconds
+        print('Waiting 30 sec for hotel-reservation to be ready')
+        time.sleep(20) # reduced from 180
+        print('hotel-reservation is ready')
+        
+        # Warm up by sending 2 requests per second for 15 seconds and then wait for 60 seconds
         # see section A.7 in the paper
         time_ = datetime.datetime.utcnow().isoformat() + 'Z'
         temp_dir = pathlib.Path('tmp')/time_
         temp_dir.mkdir(parents=True, exist_ok=True)
         trace_backup = load_trace('rps.txt')
-        dump_trace([200] * 15, 'rps.txt')
-        p, worker_ps = with_locust(temp_dir, 'hotel-reservation/locustfile.py', 'http://localhost:30001', 8)
+        # send 20 RPS for 15 seconds to warm up
+        dump_trace([20] * 15, 'rps.txt')  # Scaled down from 200 RPS to 20 RPS
+        p, worker_ps = with_locust(temp_dir, 'hotel-reservation/locustfile.py', 'http://localhost:30001', 4)  # Reduced workers from 8 to 4
         p.wait()
         for p in worker_ps:
             p.wait()
         dump_trace(trace_backup, 'rps.txt')
-        time.sleep(60)
+        print('Warmup finished. Cooling down for 30 sec')
+        time.sleep(20) # reduced from 60
 
     def teardown():
         kubectl_delete('hotel-reservation/1.json', 'hotel-reservation')
 
     application(
         name='hotel-reservation',
-        slo=0.1,  # see section 5.1 in the paper
+        slo=2,  # see section 5.1 in the paper - 100ms P99 latency -> increased to 2s SLO
         nodes={
-            'autothrottle-2': [
+            'autothrottle-2': [  # First worker node
                 'frontend',
-            ],
-            'autothrottle-3': [
+                'consul',
+                'jaeger',
+                'memcached-profile',
+                'mongodb-profile',
+                'profile',
+                'memcached-rate',
+                'mongodb-rate',
+                'rate',
                 'memcached-reserve',
-                'mongodb-recommendation',
                 'mongodb-reservation',
-                'recommendation',
                 'reservation',
             ],
-            'autothrottle-4': [
+            'autothrottle-3': [  # Second worker node
                 'geo',
                 'mongodb-geo',
-                'mongodb-user',
+                'recommendation',
+                'mongodb-recommendation',
                 'search',
                 'user',
-            ],
-            'autothrottle-5': [
-                'memcached-profile',
-                'memcached-rate',
-                'mongodb-profile',
-                'mongodb-rate',
-                'profile',
-                'rate',
+                'mongodb-user',
             ],
         },
-        target1components={  # see section A.3 in the paper
+        target1components={  # see section A.3 in the paper - high CPU usage services
             'frontend',
             'geo',
             'profile',
@@ -318,21 +330,23 @@ def hotel_reservation():
                 'k8s-cpu': [0.7],
                 'k8s-cpu-fast': [0.7],
             },
-            2000: {
-                'k8s-cpu': [0.7],
-                'k8s-cpu-fast': [0.8],
-            },
-            'noisy': {
-                'k8s-cpu': [0.6],
-                'k8s-cpu-fast': [0.7],
-            },
-            'bursty': {
-                'k8s-cpu': [0.5],
-                'k8s-cpu-fast': [0.7],
-            },
+            # 20: {  # Scaled down from 2000 RPS to 20 RPS for constant workload
+            #     'k8s-cpu': [0.7],
+            #     'k8s-cpu-fast': [0.8],
+            # },
+            # 'noisy': {
+            #     'k8s-cpu': [0.6],
+            #     'k8s-cpu-fast': [0.7],
+            # },
+            # 'bursty': {
+            #     'k8s-cpu': [0.5],
+            #     'k8s-cpu-fast': [0.7],
+            # },
         },
-        trace_multiplier=10,
-        aggregate_samples=200,
+        trace_multiplier=0.1,  # Scaled down from 10 to 0.1 (100x reduction)
+        aggregate_samples=20,  # Reduced from 200 due to shorter duration,
+        n_warmup=1,  # Reduced from 6 to {current value} due to shorter duration
     )
+
 
 hotel_reservation()

@@ -1,3 +1,8 @@
 .DS_store
 *venv*
 kube-config
+data*
+experiment*
+
+# upload data
+# rsync -avz evaluation.py hotel-reservation traces requirements.txt setup-node.sh utils.py worker-daemon.py root@autothrottle-1:

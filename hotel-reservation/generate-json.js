@@ -3,10 +3,11 @@
 
 const fs = require('fs');
 
-const worker1 = 'autothrottle-2';
-const worker2 = 'autothrottle-3';
-const worker3 = 'autothrottle-4';
-const worker4 = 'autothrottle-5';
+// Define worker nodes (excluding master node autothrottle-1)
+const worker1 = 'autothrottle-2';  // First worker node
+const worker2 = 'autothrottle-3';  // Second worker node
+
+// Define container image versions with SHA for reproducibility
 const image_go = 'igorrudyk1/hotelreservation:latest@sha256:cb64678950a01728551701f5782e34eef049e422f73eae7dcb69d7549682008c';
 const image_consul = 'consul:1.15.4@sha256:362519540425cf077229da3851f3b80d622742dd81f1b2014863c044c2124ef3';
 const image_jaeger = 'jaegertracing/all-in-one:latest@sha256:30238ffd383f266651cd4e0c36be67b6b0d3d882d0bbb67304c39af9ee61a4ef';
@@ -225,7 +226,7 @@ const doc = {
   apiVersion: 'v1',
   kind: 'List',
   items: [
-
+    // Create namespace
     {
       apiVersion: 'v1',
       kind: 'Namespace',
@@ -235,6 +236,7 @@ const doc = {
       },
     },
 
+    // Deploy Consul on worker1
     ...deployment_service('consul', {
       nodeName: worker1,
       containers: [
@@ -257,6 +259,7 @@ const doc = {
       ],
     }),
 
+    // Deploy Jaeger on worker1
     ...deployment_service('jaeger', {
       nodeName: worker1,
       containers: [
@@ -288,6 +291,7 @@ const doc = {
       ],
     }),
 
+    // Deploy Frontend on worker1
     ...deployment_service('frontend', {
       nodeName: worker1,
       containers: [
@@ -306,29 +310,35 @@ const doc = {
       ],
     }),
 
-    ...go(worker3, 'geo', 'geo', 8083),
-    ...mongodb(worker3, 'mongodb-geo', 'geo'),
+    // Services on worker2 (autothrottle-3)
+    ...go(worker2, 'geo', 'geo', 8083),
+    ...mongodb(worker2, 'mongodb-geo', 'geo'),
 
-    ...go(worker4, 'profile', 'profile', 8081),
-    ...memcached(worker4, 'memcached-profile'),
-    ...mongodb(worker4, 'mongodb-profile', 'profile'),
+    // Profile service stack on worker1
+    ...go(worker1, 'profile', 'profile', 8081),
+    ...memcached(worker1, 'memcached-profile'),
+    ...mongodb(worker1, 'mongodb-profile', 'profile'),
 
-    ...go(worker4, 'rate', 'rate', 8084),
-    ...memcached(worker4, 'memcached-rate'),
-    ...mongodb(worker4, 'mongodb-rate', 'rate'),
+    // Rate service stack on worker1
+    ...go(worker1, 'rate', 'rate', 8084),
+    ...memcached(worker1, 'memcached-rate'),
+    ...mongodb(worker1, 'mongodb-rate', 'rate'),
 
+    // Recommendation service stack on worker2
     ...go(worker2, 'recommendation', 'recommendation', 8085),
     ...mongodb(worker2, 'mongodb-recommendation', 'recommendation'),
 
-    ...go(worker2, 'reservation', 'reservation', 8087),
-    ...memcached(worker2, 'memcached-reserve'),
-    ...mongodb(worker2, 'mongodb-reservation', 'reservation'),
+    // Reservation service stack on worker1
+    ...go(worker1, 'reservation', 'reservation', 8087),
+    ...memcached(worker1, 'memcached-reserve'),
+    ...mongodb(worker1, 'mongodb-reservation', 'reservation'),
 
-    ...go(worker3, 'search', 'search', 8082),
+    // Search service on worker2
+    ...go(worker2, 'search', 'search', 8082),
 
-    ...go(worker3, 'user', 'user', 8086),
-    ...mongodb(worker3, 'mongodb-user', 'user'),
-
+    // User service stack on worker2
+    ...go(worker2, 'user', 'user', 8086),
+    ...mongodb(worker2, 'mongodb-user', 'user'),
   ],
 };
 

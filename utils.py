@@ -438,6 +438,9 @@ def benchmark(output_dir, namespace, locustfile, url, nodes, deploy, teardown, s
     for p in worker_ps:
         p.wait()
 
+    print('locust done')
+    print("Saving the stats and request log")
+
     stats_history_relative_time = {k: [(t - time_base, v) for t, v in l] for k, l in stats_history.items()}
     with lzma.open(temp_dir/'stats.json.xz', 'wt') as f:
         json.dump(stats_history_relative_time, f)
@@ -452,6 +455,7 @@ def benchmark(output_dir, namespace, locustfile, url, nodes, deploy, teardown, s
 
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     temp_dir.rename(output_dir)
+    print("Benchmark done, tearing down the applications by applying kubectl delete")
     teardown()
     print('finished')
     return True
