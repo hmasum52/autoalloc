@@ -102,17 +102,20 @@ def set_cpu_limit(pod_map, name, limit, period=0.1):
     stat_path(pod_map, name, 'cpu.cfs_quota_us').write_text(str(quota_us))
 
 # <changes>
+memory_limit_lock = threading.Lock()
+
 def set_memory_limit(pod_map, name, limit_mb):
     """Set memory limit in MB"""
-    if limit_mb is None:
-        # No limit
-        limit_bytes = 512 * 1024 * 1024  # 512MB
-    else:
-        limit_bytes = int(limit_mb * 1024 * 1024)
-    log(f'{name}: setting memory limit to {limit_bytes} bytes ({limit_mb}MB)')
-    stat_path(pod_map, name, MEMORY_LIMIT_METRIC).write_text(str(limit_bytes))
-    # read back the limit
-    log(f'{name}: memory limit set to {stat_path(pod_map, name, MEMORY_LIMIT_METRIC).read_text()} bytes')
+    with memory_limit_lock:
+        if limit_mb is None:
+            # No limit
+            limit_bytes = 512 * 1024 * 1024  # 512MB
+        else:
+            limit_bytes = int(limit_mb * 1024 * 1024)
+        log(f'{name}: setting memory limit to {limit_bytes} bytes ({limit_mb}MB)')
+        stat_path(pod_map, name, MEMORY_LIMIT_METRIC).write_text(str(limit_bytes))
+        # read back the limit
+        log(f'{name}: memory limit set to {stat_path(pod_map, name, MEMORY_LIMIT_METRIC).read_text()} bytes')
 # </changes>
 
 class ConstScaler:
@@ -295,16 +298,6 @@ def run(control, namespace, components, scalers):
     limits = {}
     memory_limits = {} # <changes>
 
-    for name in scalers:
-        assert name in components
-    for name in components:
-        limits[name] = None
-        set_cpu_limit(pod_map, name, None)
-        # <changes>
-        memory_limits[name] = None
-        set_memory_limit(pod_map, name, 256)
-        # </changes>
-
     files = {}
     for name in components:
         files[name, CPU_USASGE_METRIC] = stat_path(pod_map, name, CPU_USASGE_METRIC).open()
@@ -317,7 +310,7 @@ def run(control, namespace, components, scalers):
         # </mem>
 
     log(f'running for {namespace} {components} {files}')
-
+    
     monotonic_base = time.time() - time.perf_counter()
 
     stats_history = collections.defaultdict(list)
@@ -325,6 +318,20 @@ def run(control, namespace, components, scalers):
 
     stats_current = collections.defaultdict(list)
     control['stats_current'] = stats_current
+    
+    files[name, MEMORY_USAGE_METRIC].seek(0)
+    initial_usage = int(files[name, MEMORY_USAGE_METRIC].read().strip()) / (1024 * 1024)  # MB
+            
+    for name in scalers:
+        assert name in components
+    for name in components:
+        limits[name] = None
+        set_cpu_limit(pod_map, name, None)
+        # <changes>
+        memory_limits[name] = None
+        set_memory_limit(pod_map, name, initial_usage*1.1)
+        # </changes>
+
 
     late_end_time = 0
     while True:
@@ -391,7 +398,7 @@ def run(control, namespace, components, scalers):
             
             # <mem>
             if memory_limit is not None:
-                memory_limit = max(64, memory_limit)  # Minimum 128MB
+                memory_limit = max(64, memory_limit)  # Minimum 64MB
                 if memory_limits[name] is not None:
                     if abs(memory_limit - memory_limits[name]) >= 1:  # 1MB difference threshold
                         memory_limits[name] = memory_limit
