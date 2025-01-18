@@ -8,7 +8,7 @@ from utils import *
 resource.setrlimit(resource.RLIMIT_NOFILE, (65535, 1048576))
 signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
 
-TRACE_FOLDER_PATH = 'traces/10min'
+TRACE_FOLDER_PATH = 'traces/resampled_1min'
 
 
 # Every time a benchmark finishes, this function will be called.
@@ -27,6 +27,38 @@ def send_notification(message):
     except Exception:
         traceback.print_exc()
 
+def get_log_values(path, name, trace_duration_sec, warmup_seconds, scaler_name='autothrottle', warmup_name='', target=-1):
+    allocation = TimeSeries.zip_with(lambda *args: sum(args), *[v for k, v in load_cpu_limit(path).items()]) \
+                .downsample_time_weighted_average(60).slice(warmup_seconds + 30, float('inf')).average()
+            
+    memory_allocation = TimeSeries.zip_with(lambda *args: sum(args), *[v for k, v in load_memory_limit(path).items()]) \
+        .downsample_time_weighted_average(60).slice(warmup_seconds + 30, float('inf')).average()
+    
+    request_latency = load_request_latency(path).slice(warmup_seconds, float('inf'))
+    p99_latency = request_latency.percentage(99)
+    average_rps = len(request_latency) / trace_duration_sec
+    log = {
+        'time': datetime.datetime.utcnow().isoformat() + 'Z',
+        'path': path,
+        'application': name,
+        'trace': 'diurnal-2',
+        'scaler': scaler_name,
+        'warmup': warmup_name,
+        'target': target,
+        'allocation': allocation,
+        'memory_allocation': memory_allocation,
+        'p99_latency': p99_latency,
+        'average_rps': average_rps,
+    }
+    
+    if warmup_name == '':
+        # remove the warmup the log 
+        log.pop('warmup')
+    if target == -1:
+        # remove the target the log 
+        log.pop('target')
+    return log
+    
 
 def application(name, slo, nodes, target1components, deploy, teardown, traces_and_targets, trace_multiplier, aggregate_samples, n_warmup=6):
     locustfile = f'{name}/locustfile.py'
@@ -76,27 +108,13 @@ def application(name, slo, nodes, target1components, deploy, teardown, traces_an
             ),
             locust_workers=locust_workers,
         ):
-            allocation = TimeSeries.zip_with(lambda *args: sum(args), *[v for k, v in load_cpu_limit(path).items()]) \
-                .downsample_time_weighted_average(60).slice(warmup_seconds + 30, float('inf')).average()
-            request_latency = load_request_latency(path).slice(warmup_seconds, float('inf'))
-            p99_latency = request_latency.percentage(99)
-            average_rps = len(request_latency) / trace_duration_sec
-            log = {
-                'time': datetime.datetime.utcnow().isoformat() + 'Z',
-                'path': path,
-                'application': name,
-                'trace': 'diurnal-2',
-                'scaler': 'autothrottle',
-                'warmup': f'a{i + 1}',
-                'allocation': allocation,
-                'p99_latency': p99_latency,
-                'average_rps': average_rps,
-            }
+            log = get_log_values(path, name, trace_duration_sec, warmup_seconds, warmup_name= f'a{i+1}')
             with open('log.json', 'a') as f:
                 f.write(json.dumps(log) + '\n')
             send_notification(f'{name} warmup {i + 1} / 12 finished')
         samples += load_samples(path)
-   
+    
+    return
     # 6 normal leanring with a rate of 0.5
     for i in range(n_warmup):
         path = f'data/{name}/autothrottle-warmup/b{i + 1}'
@@ -122,22 +140,7 @@ def application(name, slo, nodes, target1components, deploy, teardown, traces_an
             locust_workers=locust_workers,
         ):
             print(f"benchmark finished for {path}. Starting duirnal 2 warmup")
-            allocation = TimeSeries.zip_with(lambda *args: sum(args), *[v for k, v in load_cpu_limit(path).items()]) \
-                .downsample_time_weighted_average(60).slice(warmup_seconds + 30, float('inf')).average()
-            request_latency = load_request_latency(path).slice(warmup_seconds, float('inf'))
-            p99_latency = request_latency.percentage(99)
-            average_rps = len(request_latency) / trace_duration_sec
-            log = {
-                'time': datetime.datetime.utcnow().isoformat() + 'Z',
-                'path': path,
-                'application': name,
-                'trace': 'diurnal-2',
-                'scaler': 'autothrottle',
-                'warmup': f'b{i + 1}',
-                'allocation': allocation,
-                'p99_latency': p99_latency,
-                'average_rps': average_rps,
-            }
+            log = get_log_values(path, name, trace_duration_sec, warmup_seconds, warmup_name= f'b{i+1}')
             with open('log.json', 'a') as f:
                 f.write(json.dumps(log) + '\n')
             send_notification(f'{name} warmup {i + 7} / 12 finished')
@@ -187,27 +190,16 @@ def application(name, slo, nodes, target1components, deploy, teardown, traces_an
             ),
             locust_workers=locust_workers,
         ):
-            allocation = TimeSeries.zip_with(lambda *args: sum(args), *[v for k, v in load_cpu_limit(path).items()]) \
-                .downsample_time_weighted_average(60).slice(warmup_seconds + 30, float('inf')).average()
-            request_latency = load_request_latency(path).slice(warmup_seconds, float('inf'))
-            p99_latency = request_latency.percentage(99)
-            average_rps = len(request_latency) / trace_duration_sec
-            log = {
-                'time': datetime.datetime.utcnow().isoformat() + 'Z',
-                'path': path,
-                'application': name,
-                'trace': trace_name,
-                'scaler': 'autothrottle',
-                'allocation': allocation,
-                'p99_latency': p99_latency,
-                'average_rps': average_rps,
-            }
+            log = get_log_values(path, name, trace_duration_sec, warmup_seconds)
+            allocation = log['allocation']
+            p99_latency = log['p99_latency']
+            
             with open('log.json', 'a') as f:
                 f.write(json.dumps(log) + '\n')
             if p99_latency <= slo:
                 with open('result.csv', 'a') as f:
-                    f.write(f'{name},{workload_name},autothrottle,{allocation:.2f}\n')
-                send_notification(f'{name} {workload_name} autothrottle result: {allocation:.2f}')
+                    f.write(f'{name},{workload_name},autothrottle,{allocation:.3f},{log["memory_allocation"]:.3f}\n')
+                send_notification(f'{name} {workload_name} autothrottle result: {allocation:.3f}')
             else:
                 detail = f'SLO not met. P99 latency = {p99_latency*1e3:.0f} ms. SLO = {slo*1e3:.0f} ms. Delete this path to run again: {path}'
                 with open('result.csv', 'a') as f:
@@ -230,28 +222,16 @@ def application(name, slo, nodes, target1components, deploy, teardown, traces_an
                     tower=DummyTower(),
                     locust_workers=locust_workers,
                 ):
-                    allocation = TimeSeries.zip_with(lambda *args: sum(args), *[v for k, v in load_cpu_limit(path).items()]) \
-                        .downsample_time_weighted_average(60).slice(warmup_seconds + 30, float('inf')).average()
-                    request_latency = load_request_latency(path).slice(warmup_seconds, float('inf'))
-                    p99_latency = request_latency.percentage(99)
-                    average_rps = len(request_latency) / trace_duration_sec
-                    log = {
-                        'time': datetime.datetime.utcnow().isoformat() + 'Z',
-                        'path': path,
-                        'application': name,
-                        'trace': trace_name,
-                        'scaler': scaler,
-                        'target': target,
-                        'allocation': allocation,
-                        'p99_latency': p99_latency,
-                        'average_rps': average_rps,
-                    }
+                    log = get_log_values(path, name, trace_duration_sec, warmup_seconds, scaler_name=scaler, target=target)
+                    allocation = log['allocation']
+                    memory_allocation = log['memory_allocation']
+                    p99_latency = log['p99_latency']
                     with open('log.json', 'a') as f:
                         f.write(json.dumps(log) + '\n')
                     if p99_latency <= slo:
                         with open('result.csv', 'a') as f:
-                            f.write(f'{name},{workload_name},{scaler},{allocation:.2f}\n')
-                        send_notification(f'{name} {workload_name} {scaler} result: {allocation:.2f}')
+                            f.write(f'{name},{workload_name},{scaler},{allocation:.3f}, {memory_allocation:.3f}\n')
+                        send_notification(f'{name} {workload_name} {scaler} result: {allocation:.3f}')
                     else:
                         detail = f'SLO not met. P99 latency = {p99_latency*1e3:.0f} ms. SLO = {slo*1e3:.0f} ms. Delete this path to run again: {path}'
                         with open('result.csv', 'a') as f:

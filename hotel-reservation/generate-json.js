@@ -183,10 +183,10 @@ function memcached(nodeName, name) {
 }
 
 function mongodb(nodeName, name, serviceName) {
-  var hostname = serviceName + '-db'
-  var storageClassName = serviceName + '-storage';
-  var volumeName = serviceName + '-pv'
-  var claimName = serviceName + '-pvc'
+  const hostname = serviceName + '-db'
+  const storageClassName = serviceName + '-storage';
+  const volumeName = serviceName + '-pv'
+  const claimName = serviceName + '-pvc'
   return [
     ...deployment_service(name, {
       strategy: { type: 'Recreate' },

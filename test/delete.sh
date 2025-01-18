@@ -1,0 +1,1 @@
+ssh root@autothrottle-1 kubectl delete -f test/

@@ -9,6 +9,45 @@ import time
 import threading
 import traceback
 
+# <changes>
+with open('./worker-daemon.log', 'w') as f:
+    pass
+
+def log(*args):
+    with open('./worker-daemon.log', 'a') as f:
+        current_date_time = time.strftime("%H:%M:%S", time.localtime())
+        f.write(f'{current_date_time} ')
+        f.write(' '.join(map(str, args)))
+        f.write('\n')
+        print(*args)
+
+CPU_USASGE_METRIC = 'cpuacct.usage'
+CPU_STAT_METRIC = 'cpu.stat'
+
+MEMORY_USAGE_METRIC = 'memory.usage_in_bytes'
+MEMORY_LIMIT_METRIC = 'memory.limit_in_bytes'
+MEMORY_STAT_METRIC = 'memory.stat'
+
+def get_memory_stats(pod_map, name):
+    # Read memory.stat file from cgroup
+    stat_path(pod_map, name, MEMORY_STAT_METRIC).read_text().splitlines()
+    # Track key metrics:
+    # - total_inactive_file (clean cache that can be reclaimed)
+    # - total_active_file (dirty cache that needs to be written)
+    # - unevictable (pinned memory)
+    # - pgfault (minor page faults)
+    # - pgmajfault (major page faults requiring disk I/O)
+    
+def calculate_memory_pressure(stats):
+    """Calculate memory pressure from stats"""
+    # Memory pressure could be calculated as:
+    # - High page fault rate 
+    # - High ratio of used memory to limit
+    # - Presence of OOM events
+    pressure = (stats['pgmajfault'] * 0.7 + 
+               stats[MEMORY_USAGE_METRIC] / stats[MEMORY_LIMIT_METRIC] * 0.3)
+    return pressure
+# </changes>
 
 def get_pod_map(namespace, components):
     name_to_uid = {}
@@ -62,13 +101,28 @@ def set_cpu_limit(pod_map, name, limit, period=0.1):
     stat_path(pod_map, name, 'cpu.cfs_period_us').write_text(str(period_us))
     stat_path(pod_map, name, 'cpu.cfs_quota_us').write_text(str(quota_us))
 
+# <changes>
+def set_memory_limit(pod_map, name, limit_mb):
+    """Set memory limit in MB"""
+    if limit_mb is None:
+        # No limit
+        limit_bytes = 512 * 1024 * 1024  # 512MB
+    else:
+        limit_bytes = int(limit_mb * 1024 * 1024)
+    log(f'{name}: setting memory limit to {limit_bytes} bytes ({limit_mb}MB)')
+    stat_path(pod_map, name, MEMORY_LIMIT_METRIC).write_text(str(limit_bytes))
+    # read back the limit
+    log(f'{name}: memory limit set to {stat_path(pod_map, name, MEMORY_LIMIT_METRIC).read_text()} bytes')
+# </changes>
 
 class ConstScaler:
     def __init__(self, limit):
+        self.name = 'const'
         self.limit = limit
 
     def __call__(self, t, stats):
-        return self.limit
+        print(f"calling {self.name} scaler")
+        return self.limit, None
 
     def update(self, limit):
         self.limit = limit
@@ -76,6 +130,7 @@ class ConstScaler:
 
 class K8sCPUScalerBase:
     def __init__(self, period, stabilization, target, initial_limit):
+        self.name = 'k8s-cpu'
         self.period = period
         self.target = target
         self.limit = initial_limit
@@ -86,6 +141,7 @@ class K8sCPUScalerBase:
         self.last_stats = None
 
     def __call__(self, t, stats):
+        print(f"calling {self.name} scaler")
         if self.last_t is None:
             self.last_t = t
             self.last_stats = stats
@@ -96,7 +152,7 @@ class K8sCPUScalerBase:
         self.scale(usage)
         self.last_t = t
         self.last_stats = stats
-        return self.limit
+        return self.limit, None
 
     def scale(self, usage):
         self.recommendations.append(usage / self.target)
@@ -110,16 +166,19 @@ class K8sCPUScalerBase:
 
 class K8sCPUScaler(K8sCPUScalerBase):
     def __init__(self, target, initial_limit=1):
+        self.name = 'k8s-cpu' # change
         super().__init__(period=15, stabilization=300, target=target, initial_limit=initial_limit)
 
 
 class K8sCPUFastScaler(K8sCPUScalerBase):
     def __init__(self, target, initial_limit=1):
+        self.name = 'k8s-cpu-fast' #change
         super().__init__(period=1, stabilization=20, target=target, initial_limit=initial_limit)
 
 
 class CaptainScaler:
     def __init__(self, target, initial_limit=1):
+        self.name = 'captain' # change
         # read-only parameters
         self.target = target
         self.period = 1
@@ -185,13 +244,48 @@ class CaptainScaler:
     def update(self, target):
         self.target = target
 
+# <changes>
+class CaptainScalerWithMemoryUsage(CaptainScaler):
+    def __init__(self, target, initial_limit=1, initial_mem_limit=256):
+        super().__init__(target, initial_limit)
+        # Memory parameters
+        self.name = 'captain_with_memory'
+        self.memory_limit = initial_mem_limit
+        self.memory_high_watermark = 0.9  # 90% usage triggers scale up
+        self.memory_low_watermark = 0.7   # 70% usage allows scale down
+        self.memory_headroom = 1.3        # Keep 30% extra capacity
+        self.min_memory = 64            # Minimum 1GB memory
 
+    def __call__(self, t, stats):
+        print(f"calling {self.name} scaler")
+        cpu_limit = super().__call__(t, stats)
+        log(f'captain_scaler: cpu limit {cpu_limit}')
+        
+        # Memory scaling
+        memory_usage = stats['memory_usage']
+        memory_limit = stats['memory_limit']
+        log(f'captain_scaler: memory usage {memory_usage}')
+        log(f'captain_scaler: pod memory limit {memory_limit}')
+        log(f'captain_scaler: scaler memory limit {self.memory_limit}')
+        memory_usage_ratio = memory_usage / self.memory_limit
+        log(f'captain_scaler: memory usage ratio {memory_usage_ratio}')
+        
+        if memory_usage_ratio > self.memory_high_watermark:
+            self.memory_limit *= 1.2  # Increase by 20%
+        elif memory_usage_ratio < self.memory_low_watermark:
+            proposed_limit = memory_usage * self.memory_headroom
+            if proposed_limit < self.memory_limit:
+                self.memory_limit = max(self.min_memory, proposed_limit)
+        log(f'captain_scaler: new memory limit {self.memory_limit}')      
+        return cpu_limit, self.memory_limit
+# </changes>
+  
 def init_scaler(data):
     return {
         'const': ConstScaler,
         'k8s-cpu-fast': K8sCPUFastScaler,
         'k8s-cpu': K8sCPUScaler,
-        'captain': CaptainScaler,
+        'captain': CaptainScalerWithMemoryUsage,
     }[data['type']](*data['params'])
 
 
@@ -199,16 +293,30 @@ def run(control, namespace, components, scalers):
     pod_map = get_pod_map(namespace, components)
 
     limits = {}
+    memory_limits = {} # <changes>
+
     for name in scalers:
         assert name in components
     for name in components:
         limits[name] = None
         set_cpu_limit(pod_map, name, None)
+        # <changes>
+        memory_limits[name] = None
+        set_memory_limit(pod_map, name, 256)
+        # </changes>
 
     files = {}
     for name in components:
-        files[name, 'cpuacct.usage'] = stat_path(pod_map, name, 'cpuacct.usage').open()
-        files[name, 'cpu.stat'] = stat_path(pod_map, name, 'cpu.stat').open()
+        files[name, CPU_USASGE_METRIC] = stat_path(pod_map, name, CPU_USASGE_METRIC).open()
+        files[name, CPU_STAT_METRIC] = stat_path(pod_map, name, CPU_STAT_METRIC).open()
+        
+        # Memory stats
+        # <mem>
+        files[name, MEMORY_USAGE_METRIC] = stat_path(pod_map, name, MEMORY_USAGE_METRIC).open()
+        files[name, MEMORY_LIMIT_METRIC] = stat_path(pod_map, name, MEMORY_LIMIT_METRIC).open()
+        # </mem>
+
+    log(f'running for {namespace} {components} {files}')
 
     monotonic_base = time.time() - time.perf_counter()
 
@@ -229,12 +337,29 @@ def run(control, namespace, components, scalers):
 
         stats = collections.defaultdict(dict)
         for name in components:
-            files[name, 'cpuacct.usage'].seek(0)
-            stats[name]['cpu_usage'] = files[name, 'cpuacct.usage'].read()
-            files[name, 'cpu.stat'].seek(0)
-            for line in files[name, 'cpu.stat'].read().splitlines():
+            # CPU stats
+            files[name, CPU_USASGE_METRIC].seek(0)
+            stats[name]['cpu_usage'] = files[name, CPU_USASGE_METRIC].read()
+            files[name, CPU_STAT_METRIC].seek(0)
+            for line in files[name, CPU_STAT_METRIC].read().splitlines():
                 k, v = line.split()
                 stats[name][f'cpu_stat.{k}'] = v
+            
+            # <mem>
+            # Memory stats
+            files[name, MEMORY_USAGE_METRIC].seek(0)
+            stats[name]['memory_usage'] = int(files[name, MEMORY_USAGE_METRIC].read().strip()) / (1024 * 1024)  # MB
+            
+            files[name, MEMORY_LIMIT_METRIC].seek(0)
+            # memory limit can undefined and a big number 9223372036854771712
+            mem_limit = files[name, MEMORY_LIMIT_METRIC].read().strip()
+            if mem_limit == '9223372036854771712':
+                stats[name]['memory_limit'] = 256  # MB
+            else: 
+                stats[name]['memory_limit'] = int(int(mem_limit) / (1024 * 1024))  # MB
+            log(f'{name}: memory limit {stats[name]["memory_limit"]}MB')
+            
+            # </mem>
 
         end_time = time.perf_counter()
         if end_time > t + (-t * 1000 % 100 / 1000):
@@ -253,7 +378,8 @@ def run(control, namespace, components, scalers):
             control['update'] = {}
 
         for name, scaler in scalers.items():
-            limit = scaler(t, stats[name])
+            limit, memory_limit = scaler(t, stats[name])   # <mem>         
+            log(f'{name}: scaler returned cpu limit {limit}, memory limit: {memory_limit}')
             if limit is not None:
                 limit = max(0.01, limit)
                 if limits[name] is not None:
@@ -262,7 +388,25 @@ def run(control, namespace, components, scalers):
             if limit != limits[name]:
                 limits[name] = limit
                 set_cpu_limit(pod_map, name, limit)
+            
+            # <mem>
+            if memory_limit is not None:
+                memory_limit = max(64, memory_limit)  # Minimum 128MB
+                if memory_limits[name] is not None:
+                    if abs(memory_limit - memory_limits[name]) >= 1:  # 1MB difference threshold
+                        memory_limits[name] = memory_limit
+                        log(f'{name}: (1)setting new memory limit to {memory_limit}MB')
+                        set_memory_limit(pod_map, name, memory_limit)
+            if memory_limit != memory_limits[name]:
+                memory_limits[name] = memory_limit
+                log(f'{name}: (2)setting new memory limit to {memory_limit}MB')
+                set_memory_limit(pod_map, name, memory_limit)
+            # </mem>
+                
             stats[name]['scaler.limit'] = limits[name]
+            stats[name]['scaler.memory_limit'] = memory_limits[name] # <mem>
+            if memory_limit is not None: # <mem>
+                log(f'[new*] {name}: cpu limit {limit}, memory limit: {memory_limit}')
 
         for name in stats:
             stats_history[name].append((t + monotonic_base, stats[name]))

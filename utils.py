@@ -393,7 +393,14 @@ def benchmark(output_dir, namespace, locustfile, url, nodes, deploy, teardown, s
                         else:
                             print('empty local stats')
                             do_tower = False
+                        
+                        # <mem> 
+                        memory_usage = sum(i[1]['memory_usage'] for i in local_stats[component]) / len(local_stats[component])
+                        memory_limit = sum(i[1]['memory_limit'] for i in local_stats[component]) / len(local_stats[component])
+
                     stats['_tower']['allocation'] = allocation
+                    stats['_tower']['memory_usage'] = memory_usage
+                    stats['_tower']['memory_limit'] = memory_limit
                     print('fetch all stats done')
 
                 if do_tower:
@@ -517,6 +524,8 @@ class TimeSeries:
         return type(self)(data)
 
     def average(self):
+        if len(self.data) == 0:
+            return None
         return sum(v for t, v in self.data) / len(self.data)
 
     def sum(self):
@@ -607,6 +616,12 @@ def load_stats(path, k):
                 data[component].append((t, d[k]))
     return {component: TimeSeries(l) for component, l in data.items()}
 
+# Add to the load_stats function in utils.py:
+def load_memory_usage(path):
+    return load_stats(path, 'memory_usage')
+
+def load_memory_limit(path):
+    return load_stats(path, 'memory_limit')
 
 def load_cpu_limit(path):
     return load_stats(path, 'scaler.limit')

@@ -1,6 +1,11 @@
 ion# Autothrottle: A Practical Bi-Level Approach to Resource Management for SLO-Targeted Microservices
 Autothrottle is a bi-level leraning-assisted resource management framework for SLO-targeted microservices published in NSDI '24. It architecturally decouples mechanisms of application SLO feedback and service resource control, and bridges them with the notion of performance targets. This decoupling enables targeted control policies for these two mechanisms, where we combine lightweight heuristics and learning techniques.
 
+
+grep -P "new memory limit \d+\.?\d*" worker-daemon.log | grep -o -P "\d+\.?\d*" > analysis.txt
+root@autothrottle-2:~# awk '{ sum += $1 } END { print "Average memory limit:", sum/NR }' analysis.txt
+Average memory limit: 38.4436
+
 ## Getting started
 Due to the complexity of installing and configuring Kubernetes, variations in different environments can often cause some scripts to fail. To minimize the impact of environmental differences and facilitate the reproducibility of our evaluation, we automated almost all installation and configuration steps and provided scripts which can be run with one command. For hardware requirements, we specified all precise details to create Azure VMs to ensure that the environment can be replicated as closely as possible. While these requirements are not mandatory, if you wish to reproduce the evaluation results in a different environment, you will need to modify the relevant sections of the code accordingly.
 
