@@ -11,7 +11,7 @@ import traceback
 
 # <changes>
 with open('./worker-daemon.log', 'w') as f:
-    pass
+    f.write('')
 
 def log(*args):
     with open('./worker-daemon.log', 'a') as f:
