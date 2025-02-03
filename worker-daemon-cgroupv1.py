@@ -1,3 +1,4 @@
+# worker daemon for cgroup v1
 #!/usr/bin/env python3
 import collections
 import json
@@ -21,11 +22,12 @@ def log(*args):
         f.write('\n')
         print(*args)
 
-# CPU_USASGE_METRIC = "cput.stat.usage_usec" # 'cpuacct.usage'
+# cgroup v1 metrics
+CPU_USASGE_METRIC = 'cpuacct.usage'
 CPU_STAT_METRIC = 'cpu.stat'
 
-MEMORY_USAGE_METRIC = 'memory.current' # memory.usage_in_bytes
-MEMORY_LIMIT_METRIC = 'memory.max' # momory.limit_in_bytes
+MEMORY_USAGE_METRIC = 'memory.usage_in_bytes'
+MEMORY_LIMIT_METRIC = 'memory.limit_in_bytes'
 MEMORY_STAT_METRIC = 'memory.stat'
 
 def get_memory_stats(pod_map, name):
@@ -50,18 +52,10 @@ def calculate_memory_pressure(stats):
 # </changes>
 
 def get_pod_map(namespace, components):
-    print('getting pod map')
-    print(f'namespace: {namespace}')
     name_to_uid = {}
-    try: 
-        # cgroup v2
-        p = subprocess.run(['kubectl', 'get', 'pods', f'-n={namespace}',
-            r'-o=jsonpath={range .items[*]}{.metadata.uid} {.metadata.name}{"\n"}{end}'],
-            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True, check=True)
-    except subprocess.CalledProcessError as e:
-        print(f'Error: {e}')
-        raise e
-    print(p)
+    p = subprocess.run(['kubectl', 'get', 'pods', f'-n={namespace}',
+        r'-o=jsonpath={range .items[*]}{.metadata.uid} {.metadata.name}{"\n"}{end}'],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True, check=True)
     for i in p.stdout.splitlines():
         uid, name = i.split()
         name = name.rsplit('-', 2)[0]
@@ -72,9 +66,7 @@ def get_pod_map(namespace, components):
     uid_to_qos = {}
     cgroup = pathlib.Path('/sys/fs/cgroup')
     for qos in ['guaranteed', 'burstable', 'besteffort']:
-        # d = cgroup/f'cpu/kubepods.slice/kubepods-{qos}.slice'
-        # cgroup v2
-        d = cgroup/f'kubepods.slice/kubepods-{qos}.slice'
+        d = cgroup/f'cpu/kubepods.slice/kubepods-{qos}.slice'
         p = f'kubepods-{qos}-pod'
         s = '.slice'
         for i in d.glob(f'{p}*{s}'):
@@ -97,31 +89,19 @@ def stat_path(pod_map, name, stat):
     qos, uid = pod_map[name]
     family, _, name = stat.partition('.')
     slices = f'kubepods.slice/kubepods-{qos}.slice/kubepods-{qos}-pod{uid.replace("-", "_")}.slice'
-    # return pathlib.Path(f'/sys/fs/cgroup/{family}/{slices}/{family}.{name}')
-    return pathlib.Path(f'/sys/fs/cgroup/{slices}/{stat}')
+    return pathlib.Path(f'/sys/fs/cgroup/{family}/{slices}/{family}.{name}')
 
 
-
-# def set_cpu_limit(pod_map, name, limit, period=0.1):
-#     period_us = round(period * 1e6)
-#     assert 1000 <= period_us <= 1000000
-#     if limit is None:
-#         quota_us = -1
-#     else:
-#         quota_us = round(limit * period_us)
-#         assert quota_us >= 1000
-    # stat_path(pod_map, name, 'cpu.cfs_period_us').write_text(str(period_us))
-    # stat_path(pod_map, name, 'cpu.cfs_quota_us').write_text(str(quota_us))
-    
-# cgroup v2
-def set_cpu_limit(pod_map, name, limit):
-    period_us = 100000  # Fixed 100ms period
+def set_cpu_limit(pod_map, name, limit, period=0.1):
+    period_us = round(period * 1e6)
+    assert 1000 <= period_us <= 1000000
     if limit is None:
-        quota = 'max'
+        quota_us = -1
     else:
-        quota = int(limit * period_us)
-        quota = max(quota, 1000)
-    stat_path(pod_map, name, 'cpu.max').write_text(f'{quota} {period_us}') # cpu.cfs_period_us
+        quota_us = round(limit * period_us)
+        assert quota_us >= 1000
+    stat_path(pod_map, name, 'cpu.cfs_period_us').write_text(str(period_us))
+    stat_path(pod_map, name, 'cpu.cfs_quota_us').write_text(str(quota_us))
 
 # <changes>
 memory_limit_lock = threading.Lock()
@@ -322,7 +302,7 @@ def run(control, namespace, components, scalers):
 
     files = {}
     for name in components:
-        # files[name, CPU_USASGE_METRIC] = stat_path(pod_map, name, CPU_USASGE_METRIC).open()
+        files[name, CPU_USASGE_METRIC] = stat_path(pod_map, name, CPU_USASGE_METRIC).open()
         files[name, CPU_STAT_METRIC] = stat_path(pod_map, name, CPU_STAT_METRIC).open()
         
         # Memory stats
@@ -367,13 +347,12 @@ def run(control, namespace, components, scalers):
         stats = collections.defaultdict(dict)
         for name in components:
             # CPU stats
-            # files[name, CPU_USASGE_METRIC].seek(0)
+            files[name, CPU_USASGE_METRIC].seek(0)
+            stats[name]['cpu_usage'] = files[name, CPU_USASGE_METRIC].read()
             files[name, CPU_STAT_METRIC].seek(0)
             for line in files[name, CPU_STAT_METRIC].read().splitlines():
                 k, v = line.split()
                 stats[name][f'cpu_stat.{k}'] = v
-            
-            stats[name]['cpu_usage'] = int(stats[name]['cpu_stat.usage_usec']) * 1e3 # nanoseconds
             
             # <mem>
             # Memory stats
@@ -383,7 +362,7 @@ def run(control, namespace, components, scalers):
             files[name, MEMORY_LIMIT_METRIC].seek(0)
             # memory limit can undefined and a big number 9223372036854771712
             mem_limit = files[name, MEMORY_LIMIT_METRIC].read().strip()
-            if mem_limit == '9223372036854771712' or mem_limit == 'max':
+            if mem_limit == '9223372036854771712':
                 stats[name]['memory_limit'] = 256  # MB
             else: 
                 stats[name]['memory_limit'] = int(int(mem_limit) / (1024 * 1024))  # MB
@@ -399,7 +378,7 @@ def run(control, namespace, components, scalers):
             stats[name]['cpu_usage'] = int(stats[name]['cpu_usage']) / 1e9
             stats[name]['cpu_stat.nr_periods'] = int(stats[name]['cpu_stat.nr_periods'])
             stats[name]['cpu_stat.nr_throttled'] = int(stats[name]['cpu_stat.nr_throttled'])
-            stats[name]['cpu_stat.throttled_time'] = int(stats[name]['cpu_stat.throttled_usec']) / 1e6
+            stats[name]['cpu_stat.throttled_time'] = int(stats[name]['cpu_stat.throttled_time']) / 1e9
 
         if control['update']:
             for k, v in control['update'].items():

@@ -4,8 +4,8 @@
 const fs = require('fs');
 
 // Define worker nodes (excluding master node autothrottle-1)
-const worker1 = 'autothrottle-2';  // First worker node
-const worker2 = 'autothrottle-3';  // Second worker node
+const worker1 = 'dr-adnan-32core-128gb-50gb-2';  // First worker node
+const worker2 = 'dr-adnan-32core-128gb-50gb-3';  // Second worker node
 
 // Define container image versions with SHA for reproducibility
 const image_go = 'igorrudyk1/hotelreservation:latest@sha256:cb64678950a01728551701f5782e34eef049e422f73eae7dcb69d7549682008c';

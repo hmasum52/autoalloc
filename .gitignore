@@ -4,5 +4,6 @@ kube-config
 data*
 experiment*
 *.pem
+digest.txt
 # upload data
 # rsync -avz evaluation.py hotel-reservation traces requirements.txt setup-node.sh utils.py worker-daemon.py root@autothrottle-1:

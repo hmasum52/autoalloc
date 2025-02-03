@@ -271,7 +271,7 @@ def hotel_reservation():
         name='hotel-reservation',
         slo=2,  # see section 5.1 in the paper - 100ms P99 latency -> increased to 2s SLO
         nodes={
-            '172.0.10.66': [  # First worker node
+            'autothrottle-2': [  # First worker node
                 'frontend',
                 'consul',
                 'jaeger',
@@ -285,7 +285,7 @@ def hotel_reservation():
                 'mongodb-reservation',
                 'reservation',
             ],
-            '172.0.10.152': [  # Second worker node
+            'autothrottle-3': [  # Second worker node
                 'geo',
                 'mongodb-geo',
                 'recommendation',
